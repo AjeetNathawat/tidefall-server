@@ -47,3 +47,7 @@ export {
 export { generateBoard } from "./board/generator";
 export { mulberry32, shuffle, rollDie } from "./board/rng";
 export type { RNG } from "./board/rng";
+
+// Variant catalog
+export { VARIANTS, DEFAULT_VARIANT, getVariant } from "./board/variants";
+export type { VariantId, VariantSpec } from "./board/variants";

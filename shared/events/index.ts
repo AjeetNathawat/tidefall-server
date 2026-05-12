@@ -18,9 +18,11 @@ export interface LobbyPlayer {
 }
 
 export interface LobbySettings {
-  playerCount: 3 | 4;
+  /** How many seats are open. Bounds depend on the chosen variant. */
+  playerCount: number;
   turnTimer: 0 | 60 | 120 | 180;
-  board: "random" | "balanced";
+  /** Board variant id from `packages/shared/src/board/variants.ts`. */
+  variantId: string;
 }
 
 export interface LobbyState {

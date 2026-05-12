@@ -1,4 +1,13 @@
-import { initGame, type GameState, type LobbyState, type LobbySettings, type PlayerColor, type PlayerId } from "./shared";
+import {
+  initGame,
+  getVariant,
+  DEFAULT_VARIANT,
+  type GameState,
+  type LobbyState,
+  type LobbySettings,
+  type PlayerColor,
+  type PlayerId,
+} from "./shared";
 
 const COLORS: PlayerColor[] = ["red", "blue", "orange", "white"];
 
@@ -7,10 +16,15 @@ export class Room {
   game: GameState | null = null;
 
   constructor(public code: string) {
+    const v = getVariant(DEFAULT_VARIANT);
     this.lobby = {
       code,
       players: [],
-      settings: { playerCount: 4, turnTimer: 0, board: "random" },
+      settings: {
+        playerCount: Math.min(4, v.maxPlayers),
+        turnTimer: 0,
+        variantId: v.id,
+      },
       hostSocketId: null,
       gameStarted: false,
     };
@@ -93,7 +107,13 @@ export class Room {
 
   updateSettings(socketId: string, settings: Partial<LobbySettings>): boolean {
     if (socketId !== this.lobby.hostSocketId) return false;
-    this.lobby.settings = { ...this.lobby.settings, ...settings };
+    const merged: LobbySettings = { ...this.lobby.settings, ...settings };
+    // Clamp playerCount against the (possibly new) variant's bounds
+    const v = getVariant(merged.variantId);
+    const clamped = Math.max(v.minPlayers, Math.min(v.maxPlayers, merged.playerCount));
+    merged.playerCount = clamped;
+    merged.variantId = v.id;
+    this.lobby.settings = merged;
     // Trim players if shrinking player count
     if (this.lobby.players.length > this.lobby.settings.playerCount) {
       this.lobby.players = this.lobby.players.slice(0, this.lobby.settings.playerCount);
@@ -103,6 +123,9 @@ export class Room {
 
   startGame(socketId: string): { ok: true } | { ok: false; error: string } {
     if (socketId !== this.lobby.hostSocketId) return { ok: false, error: "not_host" };
+    const v = getVariant(this.lobby.settings.variantId);
+    if (this.lobby.players.length < v.minPlayers) return { ok: false, error: "not_enough_players" };
+    if (this.lobby.players.length > v.maxPlayers) return { ok: false, error: "too_many_players" };
     if (this.lobby.players.length < this.lobby.settings.playerCount) return { ok: false, error: "not_enough_players" };
     if (!this.lobby.players.every((p) => p.ready)) return { ok: false, error: "not_all_ready" };
 
@@ -111,6 +134,7 @@ export class Room {
       roomCode: this.code,
       seed,
       players: this.lobby.players.map((p) => ({ id: p.playerId, name: p.name })),
+      variantId: v.id,
     });
     // Override player colors from lobby
     this.game = {

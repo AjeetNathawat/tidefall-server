@@ -175,7 +175,8 @@ export function reduce(state: GameState, action: Action): Result<GameState> {
   if (next.meta.phase === "game_over" || next.winnerId !== null) return result;
 
   const active = next.meta.activePlayerId;
-  if (totalVPFor(next, active) >= 10) {
+  const target = next.meta.vpTarget;
+  if (totalVPFor(next, active) >= target) {
     const winner = next.players[active]!;
     return ok({
       ...next,
@@ -183,7 +184,7 @@ export function reduce(state: GameState, action: Action): Result<GameState> {
       meta: { ...next.meta, phase: "game_over" },
       log: [
         ...next.log,
-        { type: "log", t: next.meta.sequence, text: `🏆 ${winner.name} wins with 10+ victory points!` },
+        { type: "log", t: next.meta.sequence, text: `🏆 ${winner.name} wins with ${target}+ victory points!` },
       ],
     });
   }

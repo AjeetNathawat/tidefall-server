@@ -24,12 +24,15 @@ export const HEX_RADIUS = HEX_H / 2; // center → corner (≈ 69.28)
 const COL_STEP = HEX_W; // adjacent column hexes share an edge — no gap
 const ROW_STEP = (HEX_H * 3) / 4; // ≈ 103.92 — proper pointy-top row spacing
 
-const ROWS: readonly number[] = [3, 4, 5, 4, 3];
-
-/** Pixel center of hex at (rowIdx, colIdx). */
-function hexCenter(rowIdx: number, colIdx: number): { cx: number; cy: number } {
-  const rowLen = ROWS[rowIdx]!;
-  const xOffset = ((5 - rowLen) * COL_STEP) / 2;
+/** Pixel center of hex at (rowIdx, colIdx) given the variant's row layout. */
+function hexCenter(
+  rows: readonly number[],
+  rowIdx: number,
+  colIdx: number,
+): { cx: number; cy: number } {
+  const rowLen = rows[rowIdx]!;
+  const maxLen = Math.max(...rows);
+  const xOffset = ((maxLen - rowLen) * COL_STEP) / 2;
   return {
     cx: xOffset + colIdx * COL_STEP + HEX_W / 2,
     cy: rowIdx * ROW_STEP + HEX_H / 2,
@@ -49,7 +52,7 @@ function cornerOffsets(): readonly (readonly [number, number])[] {
 const CORNERS = cornerOffsets();
 
 /** Build hex/vertex/edge graph from row layout. Pure & deterministic. */
-export function buildGraph(): {
+export function buildGraph(rows: readonly number[]): {
   hexes: Hex[];
   vertices: Vertex[];
   edges: Edge[];
@@ -62,9 +65,9 @@ export function buildGraph(): {
 
   // 1) Place hexes
   let id = 0;
-  ROWS.forEach((len, rowIdx) => {
+  rows.forEach((len, rowIdx) => {
     for (let col = 0; col < len; col++) {
-      const { cx, cy } = hexCenter(rowIdx, col);
+      const { cx, cy } = hexCenter(rows, rowIdx, col);
       hexes.push({
         id: id++,
         row: rowIdx,
@@ -187,12 +190,33 @@ function orderPerimeter(coastal: readonly Edge[], _vertices: readonly Vertex[]):
   return ring;
 }
 
+/** Build port type list scaled to portCount.
+ *  Always includes one specific 2:1 port per resource (5 ports); remaining slots are 3:1 generic. */
+function buildPortTypes(portCount: number): PortType[] {
+  const types: PortType[] = [
+    { kind: "specific", resource: "brick", ratio: 2 },
+    { kind: "specific", resource: "lumber", ratio: 2 },
+    { kind: "specific", resource: "ore", ratio: 2 },
+    { kind: "specific", resource: "grain", ratio: 2 },
+    { kind: "specific", resource: "wool", ratio: 2 },
+  ];
+  // Fill the remainder with generic 3:1 ports. If portCount < 5, drop the
+  // least-impactful specific resources first (keep diversity for small boards).
+  if (portCount >= 5) {
+    for (let i = 0; i < portCount - 5; i++) types.push({ kind: "generic", ratio: 3 });
+  } else {
+    types.length = portCount; // truncate; still gives variety on tiny boards
+  }
+  return types;
+}
+
 /** Build port slots with corrected placement. */
 export function buildPorts(
   hexes: readonly Hex[],
   vertices: readonly Vertex[],
   edges: readonly Edge[],
   rng: RNG,
+  portCount = 9,
 ): { ports: PortSlot[]; vertexPort: Map<VertexId, PortSlotId>; edgePort: Map<EdgeId, PortSlotId> } {
   // 1. Coastal edges: edge.hexes.length === 1 AND both endpoints are coastal vertices
   const coastal = edges.filter(
@@ -205,24 +229,15 @@ export function buildPorts(
   // 2. Order them around the perimeter
   const ring = orderPerimeter(coastal, vertices);
 
-  // 3. Pick 9 evenly-spaced indices (no two adjacent in ring order)
-  const N = ring.length; // 30 for standard Catan
-  const slotCount = 9;
-  const stride = N / slotCount; // 3.33...
+  // 3. Pick `portCount` evenly-spaced indices (no two adjacent in ring order).
+  //    Bounded above by the number of coastal edges available.
+  const slotCount = Math.min(portCount, ring.length);
+  const N = ring.length;
+  const stride = N / Math.max(1, slotCount);
   const slotEdges = Array.from({ length: slotCount }, (_, i) => ring[Math.floor(i * stride)]!);
 
-  // 4. Shuffle port types into slots
-  const types: PortType[] = [
-    { kind: "generic", ratio: 3 },
-    { kind: "generic", ratio: 3 },
-    { kind: "generic", ratio: 3 },
-    { kind: "generic", ratio: 3 },
-    { kind: "specific", resource: "brick", ratio: 2 },
-    { kind: "specific", resource: "lumber", ratio: 2 },
-    { kind: "specific", resource: "ore", ratio: 2 },
-    { kind: "specific", resource: "grain", ratio: 2 },
-    { kind: "specific", resource: "wool", ratio: 2 },
-  ];
+  // 4. Shuffle port types into slots (variant-aware count)
+  const types = buildPortTypes(slotCount);
   const shuffledTypes = shuffle(types, rng);
 
   const ports: PortSlot[] = [];
@@ -269,30 +284,8 @@ export function buildPorts(
 }
 
 // ====== Terrain & number assignment ======
-const TERRAIN_BAG: readonly Terrain[] = [
-  "forest",
-  "forest",
-  "forest",
-  "forest",
-  "fields",
-  "fields",
-  "fields",
-  "fields",
-  "pasture",
-  "pasture",
-  "pasture",
-  "pasture",
-  "hills",
-  "hills",
-  "hills",
-  "mountains",
-  "mountains",
-  "mountains",
-  "desert",
-];
-
-// Standard Catan token order (letter-based placement). 18 tokens (skip desert).
-const NUMBER_BAG: readonly number[] = [5, 2, 6, 3, 8, 10, 9, 12, 11, 4, 8, 10, 9, 4, 5, 6, 3, 11];
+// Terrain and number distributions now come from the variant catalog (board/variants.ts).
+// The bags are passed into `assignTerrainAndNumbers` so the same fn handles every variant.
 
 /** Returns true if any 6/8 token is adjacent to another 6/8 token. */
 function hasRedAdjacency(hexes: readonly Hex[]): boolean {
@@ -315,22 +308,30 @@ function areAdjacentHexes(a: Hex, b: Hex): boolean {
   return Math.hypot(dx, dy) < HEX_W * 1.2 && (dx > 1 || dy > 1);
 }
 
-/** Assign terrain (shuffled) and numbers (in fixed order to non-desert hexes). */
+/** Assign terrain (shuffled from bag) and numbers (in bag order to non-desert hexes). */
 export function assignTerrainAndNumbers(
   hexes: Hex[],
   rng: RNG,
-  options: { avoidRedAdjacency?: boolean } = {},
+  options: {
+    terrainBag: readonly Terrain[];
+    numberBag: readonly number[];
+    avoidRedAdjacency?: boolean;
+  },
 ): void {
+  const { terrainBag, numberBag } = options;
   const avoidRed = options.avoidRedAdjacency ?? true;
+  if (terrainBag.length !== hexes.length) {
+    throw new Error(`terrainBag length ${terrainBag.length} != hexes count ${hexes.length}`);
+  }
   const MAX_ATTEMPTS = 200;
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const terrains = shuffle(TERRAIN_BAG, rng);
+    const terrains = shuffle(terrainBag, rng);
     let numIdx = 0;
     for (let i = 0; i < hexes.length; i++) {
       const h = hexes[i]!;
       h.terrain = terrains[i]!;
-      h.number = h.terrain === "desert" ? null : NUMBER_BAG[numIdx++]!;
+      h.number = h.terrain === "desert" ? null : (numberBag[numIdx++] ?? null);
     }
     if (!avoidRed || !hasRedAdjacency(hexes)) return;
   }

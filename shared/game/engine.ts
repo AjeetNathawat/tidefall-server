@@ -19,18 +19,22 @@ import {
   err,
 } from "./types";
 import { generateBoard } from "../board/generator";
+import { getVariant } from "../board/variants";
 import { mulberry32, shuffle } from "../board/rng";
 
 export interface InitParams {
   roomCode: string;
   seed: number;
   players: { id: PlayerId; name: string }[];
+  /** Optional variant id; defaults to "drowning_isles". */
+  variantId?: string;
 }
 
 /** Build initial GameState. Phase: setup_round_1. */
 export function initGame(params: InitParams): GameState {
-  const { roomCode, seed, players } = params;
-  const board = generateBoard(seed);
+  const { roomCode, seed, players, variantId } = params;
+  const variant = getVariant(variantId);
+  const board = generateBoard(seed, variant.id);
   const rng = mulberry32(seed ^ 0xdeadbeef);
 
   // Build dev deck (25 cards) and shuffle
@@ -77,6 +81,8 @@ export function initGame(params: InitParams): GameState {
     meta: {
       roomCode,
       seed,
+      variantId: variant.id,
+      vpTarget: variant.vpTarget,
       phase: "setup_round_1",
       sequence: 0,
       activePlayerId: playerStates[0]!.id,

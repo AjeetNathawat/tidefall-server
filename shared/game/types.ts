@@ -1,6 +1,6 @@
 // ===== Core IDs & primitives =====
-export type PlayerId = 0 | 1 | 2 | 3;
-export type PlayerColor = "red" | "blue" | "orange" | "white";
+export type PlayerId = 0 | 1 | 2 | 3 | 4 | 5;
+export type PlayerColor = "red" | "blue" | "orange" | "white" | "teal" | "violet";
 
 export type Resource = "brick" | "lumber" | "ore" | "grain" | "wool";
 export const RESOURCES: readonly Resource[] = ["brick", "lumber", "ore", "grain", "wool"] as const;
@@ -134,6 +134,10 @@ export interface GameState {
   meta: {
     roomCode: string;
     seed: number;
+    /** Board variant id (e.g. "drowning_isles") — drives geometry, terrain bag, port count, VP target. */
+    variantId: string;
+    /** Victory threshold: 10 for classic, 7 for compact, 12 for sprawl. */
+    vpTarget: number;
     phase: Phase;
     sequence: number;
     activePlayerId: PlayerId;
@@ -202,7 +206,7 @@ export const ok = <T>(value: T): Ok<T> => ({ ok: true, value });
 export const err = <E>(error: E): Err<E> => ({ ok: false, error });
 
 // ===== Player defs (defaults) =====
-export const PLAYER_COLORS: readonly PlayerColor[] = ["red", "blue", "orange", "white"] as const;
+export const PLAYER_COLORS: readonly PlayerColor[] = ["red", "blue", "orange", "white", "teal", "violet"] as const;
 
 // ===== Terrain → resource =====
 export const TERRAIN_RESOURCE: Record<Terrain, Resource | null> = {

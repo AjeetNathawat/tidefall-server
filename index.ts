@@ -208,6 +208,7 @@ function errorMessage(code: string): string {
     case "game_already_started": return "Game already started — can't join in progress.";
     case "not_host": return "Only the host can do that.";
     case "not_enough_players": return "Need more players to start.";
+    case "too_many_players": return "This chart can't seat that many settlers.";
     case "not_all_ready": return "All players must ready up first.";
     case "not_your_turn": return "Not your turn.";
     case "invalid_phase": return "Can't do that right now.";
