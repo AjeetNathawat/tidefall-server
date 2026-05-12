@@ -121,7 +121,8 @@ export function validRoadEdges(state: GameState, playerId: PlayerId, mustConnect
 }
 
 // ============== Reducer ==============
-export function reduce(state: GameState, action: Action): Result<GameState> {
+/** Inner switch — applies one action; the exported `reduce` wraps this with a victory check. */
+function applyAction(state: GameState, action: Action): Result<GameState> {
   switch (action.type) {
     case "PLACE_SETTLEMENT": return applyPlaceSettlement(state, action.playerId, action.vertexId);
     case "PLACE_ROAD":       return applyPlaceRoad(state, action.playerId, action.edgeId);
@@ -146,6 +147,47 @@ export function reduce(state: GameState, action: Action): Result<GameState> {
       return err(`unsupported_action:${(_exhaustive as { type: string }).type}`);
     }
   }
+}
+
+/**
+ * Total VP for a player including longest-road, largest-army, and hidden VP cards.
+ * Used for victory check; not exposed to other players (we keep the hidden portion private).
+ */
+function totalVPFor(state: GameState, pid: PlayerId): number {
+  const p = state.players[pid];
+  if (!p) return 0;
+  let total = p.publicVP + p.hiddenVP;
+  if (state.longestRoad.holderId === pid) total += 2;
+  if (state.largestArmy.holderId === pid) total += 2;
+  return total;
+}
+
+/**
+ * Public reducer: apply one action, then run a victory check.
+ * Victory triggers when the active player's total VP (public + hidden + Longest Road +
+ * Largest Army) reaches 10 on their own turn. Setup phases are exempt.
+ */
+export function reduce(state: GameState, action: Action): Result<GameState> {
+  const result = applyAction(state, action);
+  if (!result.ok) return result;
+  const next = result.value;
+  if (next.meta.phase === "setup_round_1" || next.meta.phase === "setup_round_2") return result;
+  if (next.meta.phase === "game_over" || next.winnerId !== null) return result;
+
+  const active = next.meta.activePlayerId;
+  if (totalVPFor(next, active) >= 10) {
+    const winner = next.players[active]!;
+    return ok({
+      ...next,
+      winnerId: active,
+      meta: { ...next.meta, phase: "game_over" },
+      log: [
+        ...next.log,
+        { type: "log", t: next.meta.sequence, text: `🏆 ${winner.name} wins with 10+ victory points!` },
+      ],
+    });
+  }
+  return result;
 }
 
 // --- Setup placement ---

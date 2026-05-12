@@ -11,7 +11,21 @@ import {
 import { Room } from "./room";
 
 const PORT = Number(process.env.PORT || 3030);
-const httpServer = createServer((_req, res) => {
+const STARTED_AT = Date.now();
+
+const httpServer = createServer((req, res) => {
+  // /health → JSON status, used for monitoring and HF Spaces wake-up pings
+  if (req.url === "/health") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        status: "ok",
+        rooms: rooms.size,
+        uptimeSeconds: Math.floor((Date.now() - STARTED_AT) / 1000),
+      }),
+    );
+    return;
+  }
   res.writeHead(200, { "Content-Type": "text/plain" });
   res.end("Tidefall server OK");
 });
@@ -44,11 +58,33 @@ function emitError(socketId: string, code: string, message: string) {
   io.to(socketId).emit("s2c", payload);
 }
 
+// Per-socket sliding-window rate limit: max RATE_MAX events in any RATE_WINDOW_MS.
+// Protects against accidental floods, runaway clients, and basic abuse.
+const RATE_MAX = 30;
+const RATE_WINDOW_MS = 10_000;
+
 io.on("connection", (socket) => {
   let joinedCode: string | null = null;
   let joinedName: string | null = null;
+  // Timestamps of the most recent events from this socket (oldest first).
+  const eventTimes: number[] = [];
+
+  /** Returns true if the socket exceeded the rate limit; emits an error if so. */
+  function isRateLimited(): boolean {
+    const now = Date.now();
+    while (eventTimes.length > 0 && eventTimes[0]! < now - RATE_WINDOW_MS) {
+      eventTimes.shift();
+    }
+    if (eventTimes.length >= RATE_MAX) {
+      emitError(socket.id, "rate_limited", "Slow down — too many actions per second.");
+      return true;
+    }
+    eventTimes.push(now);
+    return false;
+  }
 
   socket.on("c2s", (event: C2SEvent) => {
+    if (isRateLimited()) return;
     try {
       switch (event.type) {
         case "JOIN_ROOM": {
